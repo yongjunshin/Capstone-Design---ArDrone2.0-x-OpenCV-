@@ -1,0 +1,154 @@
+namedWindow("Control", 0); //create a window called "Control"
+
+	int ballFlag = 0;
+
+	int iLowH = 110;
+	int iHighH = 130;
+
+	int iLowS = 100;
+	int iHighS = 255;
+
+	int iLowV = 50;
+	int iHighV = 255;
+
+	//Create trackbars in "Control" window
+	cvCreateTrackbar("LowH", "Control", &iLowH, 255); //Hue (0 - 255)
+	cvCreateTrackbar("HighH", "Control", &iHighH, 255);
+
+	cvCreateTrackbar("LowS", "Control", &iLowS, 255); //Saturation (0 - 255)
+	cvCreateTrackbar("HighS", "Control", &iHighS, 255);
+
+	cvCreateTrackbar("LowV", "Control", &iLowV, 255); //Value (0 - 255)
+	cvCreateTrackbar("HighV", "Control", &iHighV, 255);
+
+	
+	// Ar.Drone ball_tracking variables
+	cv::Mat SmoothImg;
+	cv::Mat HSVImg;
+	cv::Mat GrayImg;
+	cv::Mat mask;
+	cv::Mat erodeElement = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+	cv::Mat dilateElement = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+	cv::Mat temp;
+
+
+		cv::GaussianBlur(image, SmoothImg, cv::Size(5, 5), 2, 2);
+
+	cv::cvtColor(SmoothImg, HSVImg, cv::COLOR_BGR2HSV); //Convert the captured frame from BGR to HSV
+	cv::GaussianBlur(HSVImg, HSVImg, cv::Size(5, 5), 2, 2);
+
+	cv::cvtColor(SmoothImg, GrayImg, cv::COLOR_BGR2GRAY);
+
+	cv::Canny(GrayImg, GrayImg, 100, 2, 3);
+
+	inRange(HSVImg, cv::Scalar(iLowH, iLowS, iLowV), cv::Scalar(iHighH, iHighS, iHighV), mask); //	 the image
+
+	//morphological opening (remove small objects from the foreground)
+
+	for (int i = 0; i < 50; i++)
+	{
+		cv::dilate(mask, mask, dilateElement);
+		cv::erode(mask, mask, erodeElement);
+	}
+
+	std::vector<cv::Vec3f> Circles_canny;
+	std::vector<cv::Vec3f> Circles_mask;
+
+	cv::HoughCircles(GrayImg, Circles_canny, CV_HOUGH_GRADIENT, 2, GrayImg.rows, 100, 40, 20, 0);
+	cv::HoughCircles(mask, Circles_mask, CV_HOUGH_GRADIENT, 2, mask.rows / 2, 100, 40, 20, 0);
+
+	cv::Point center_canny;
+	cv::Point center_mask;
+
+	int radius_canny = 0;
+	int radius_mask = 0;
+
+	GaussianBlur(mask, temp, cv::Size(5, 5), 2, 2);
+
+	//find contours from binary image
+	std::vector<std::vector<cv::Point>> contours;
+	cv::findContours(temp, contours, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE); //find contours
+	std::vector<double> areas(contours.size());
+
+	//find largest contour area
+	for (int i = 0; i < contours.size(); i++)
+	{
+		areas[i] = cv::contourArea(cv::Mat(contours[i]));
+	}
+
+	//get index of largest contour
+	double max;
+	cv::Point maxPosition;
+	cv::minMaxLoc(cv::Mat(areas), 0, &max, 0, &maxPosition);
+
+	//draw bounding rectangle around largest contour
+	cv::Point center;
+	cv::Rect r;
+	if (contours.size() >= 1)
+	{
+		r = boundingRect(contours[maxPosition.y]);
+		center.x = r.x + (r.width / 2);
+		center.y = r.y + (r.height / 2);
+	}
+
+	// Variables to save
+	int temp_x = 320;
+	int temp_y = 180;
+	int temp_radius;
+
+	if (contours.size() >= 1){
+		/*for (int i = 0; i < Circles_canny.size(); i++)
+		{
+		center_canny.x = cvRound(Circles_canny[i][0]);
+		center_canny.y = cvRound(Circles_canny[i][1]);
+		radius_canny = cvRound(Circles_canny[i][2]);*/
+		for (int j = 0; j < Circles_mask.size(); j++)
+		{
+			center_mask.x = cvRound(Circles_mask[j][0]);
+			center_mask.y = cvRound(Circles_mask[j][1]);
+			radius_mask = cvRound(Circles_mask[j][2]);
+
+			if ((abs(center_mask.x - center.x) <= 10)
+				&& (abs(center_mask.y - center.y) <= 10)
+				&& (abs(r.width / 2 - radius_mask <= 10)))
+			{
+				temp_x = (center_mask.x + center.x) / 2;
+				temp_y = (center_mask.y + center.y) / 2;
+				temp_radius = (r.width / 2 + radius_mask) / 2;
+				rectangle(image, r.tl(), r.br(), CV_RGB(255, 0, 0), 2, 8, 0); //draw rectangle
+
+			}
+		}
+		//}
+	}
+
+	if (ballFlag == 1){
+		if (temp_x <= 300 && temp_x > 200) { vy = 0.1; }
+		if (temp_x <= 200 && temp_x >= 0) { vy = 0.2; }
+		if (temp_x >= 340 && temp_x < 440) { vy = -0.1; }
+		if (temp_x >= 440 && temp_x <= 640) { vy = -0.2; }
+		if (temp_y <= 170) { vz = 0.2; }
+		if (temp_y >= 190) { vz = -0.2; }
+
+		/*if (temp_radius <= 40) {
+		//vx = 0.5;
+		std::cout << "앞으로\n" << std::endl;
+		}
+		if (temp_radius >= 50) {
+		//vx = -0.5;
+		std::cout << "뒤로\n" << std::endl;
+		}*/
+	}
+	ardrone.move3D(vx, vy, vz, vr);
+
+	line(image, cv::Point(0, image.rows / 2), cv::Point(image.cols, image.rows / 2), cv::Scalar(255, 0, 0), 1, 8, 0);
+	line(image, cv::Point(image.cols / 2, 0), cv::Point(image.cols / 2, image.rows), cv::Scalar(255, 0, 0), 1, 8, 0);
+
+	SmoothImg.release();
+	HSVImg.release();
+	GrayImg.release();
+	mask.release();
+	erodeElement.release();
+	dilateElement.release();
+	temp.release();
+}
